@@ -32,6 +32,7 @@ import io.github.dsheirer.audio.broadcast.BroadcastModel;
 import io.github.dsheirer.audio.broadcast.BroadcastServerType;
 import io.github.dsheirer.audio.broadcast.BroadcastState;
 import io.github.dsheirer.audio.broadcast.ConfiguredBroadcast;
+import io.github.dsheirer.channel.metadata.ChannelMetadata;
 import io.github.dsheirer.channel.state.State;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelModel;
@@ -95,6 +96,7 @@ public class ThinlineRadioHealthReporter
     private final TunerManager mTunerManager;
     private final long mStartedAt = System.currentTimeMillis();
     private final Map<String, Long> mLastControlSeen = new ConcurrentHashMap<>();
+    private final Set<String> mKnownTrunked = ConcurrentHashMap.newKeySet();
     private final Set<Integer> mReportingConfigurations = ConcurrentHashMap.newKeySet();
     private final HttpClient mHttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -712,21 +714,32 @@ public class ThinlineRadioHealthReporter
 
             DecoderType decoderType = channel.getDecodeConfiguration() == null ? null :
                 channel.getDecodeConfiguration().getDecoderType();
-            boolean trunking = decoderType != null && TRUNKING_DECODERS.contains(decoderType);
             String key = channelKey(channel);
             seen.add(key);
 
             ProcessingChain chain = mChannelProcessingManager.getProcessingChain(channel);
             List<State> states = List.of();
             boolean overflow = false;
+            Double signalLevel = null;
 
             if(chain != null && chain.getChannelState() != null)
             {
                 states = chain.getChannelState().getStates();
                 overflow = chain.getChannelState().isOverflow();
+
+                for(ChannelMetadata channelMetadata: chain.getChannelState().getChannelMetadata())
+                {
+                    Double level = channelMetadata.getSignalLevel();
+
+                    if(level != null && !level.isInfinite())
+                    {
+                        signalLevel = level;
+                    }
+                }
             }
 
             boolean inControl = states.contains(State.CONTROL);
+            boolean trunking = isTrunked(decoderType, inControl, key);
 
             if(trunking && inControl)
             {
@@ -747,7 +760,8 @@ public class ThinlineRadioHealthReporter
                 controlLost = !inControl && now - last >= CONTROL_LOST_AFTER_MS;
             }
 
-            boolean noTuner = trunking && !isProcessing && now - mStartedAt > CONTROL_LOST_AFTER_MS;
+            boolean noTuner = decoderType != null && TRUNKING_DECODERS.contains(decoderType) && !isProcessing &&
+                now - mStartedAt > CONTROL_LOST_AFTER_MS;
             ObjectNode node = channels.addObject();
             node.put("name", text(channel.getName()));
             node.put("system", text(channel.getSystem()));
@@ -785,6 +799,11 @@ public class ThinlineRadioHealthReporter
             node.put("noTuner", noTuner);
             node.put("overflow", overflow);
 
+            if(signalLevel != null)
+            {
+                node.put("signalDb", Math.round(signalLevel * 10) / 10.0);
+            }
+
             if(controlLost || noTuner)
             {
                 signature.append(key).append(":lost=").append(controlLost).append(",noTuner=").append(noTuner).append(';');
@@ -809,6 +828,28 @@ public class ThinlineRadioHealthReporter
         }
 
         return states.get(0).name();
+    }
+
+    /**
+     * A channel is trunked once it has locked onto a control channel, here or in an earlier run. Conventional DMR,
+     * P25 and NXDN channels never do, so they never report a lost control channel.
+     */
+    private boolean isTrunked(DecoderType decoderType, boolean inControl, String key)
+    {
+        if(decoderType == null || !TRUNKING_DECODERS.contains(decoderType))
+        {
+            return false;
+        }
+        if(mKnownTrunked.contains(key))
+        {
+            return true;
+        }
+        if(!mUserPreferences.getThinlineRadioPreference().isTrunkedChannel(key, inControl))
+        {
+            return false;
+        }
+        mKnownTrunked.add(key);
+        return true;
     }
 
     private static String channelKey(Channel channel)
