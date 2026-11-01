@@ -32,6 +32,7 @@ import io.github.dsheirer.audio.broadcast.BroadcastModel;
 import io.github.dsheirer.audio.broadcast.BroadcastServerType;
 import io.github.dsheirer.audio.broadcast.BroadcastState;
 import io.github.dsheirer.audio.broadcast.ConfiguredBroadcast;
+import io.github.dsheirer.channel.metadata.ChannelMetadata;
 import io.github.dsheirer.channel.state.State;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelModel;
@@ -719,11 +720,22 @@ public class ThinlineRadioHealthReporter
             ProcessingChain chain = mChannelProcessingManager.getProcessingChain(channel);
             List<State> states = List.of();
             boolean overflow = false;
+            Double signalLevel = null;
 
             if(chain != null && chain.getChannelState() != null)
             {
                 states = chain.getChannelState().getStates();
                 overflow = chain.getChannelState().isOverflow();
+
+                for(ChannelMetadata channelMetadata: chain.getChannelState().getChannelMetadata())
+                {
+                    Double level = channelMetadata.getSignalLevel();
+
+                    if(level != null && !level.isInfinite())
+                    {
+                        signalLevel = level;
+                    }
+                }
             }
 
             boolean inControl = states.contains(State.CONTROL);
@@ -786,6 +798,11 @@ public class ThinlineRadioHealthReporter
             node.put("controlLost", controlLost);
             node.put("noTuner", noTuner);
             node.put("overflow", overflow);
+
+            if(signalLevel != null)
+            {
+                node.put("signalDb", Math.round(signalLevel * 10) / 10.0);
+            }
 
             if(controlLost || noTuner)
             {
