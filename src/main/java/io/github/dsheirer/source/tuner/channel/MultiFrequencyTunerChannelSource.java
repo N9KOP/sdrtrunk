@@ -54,6 +54,8 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
     private Listener<ComplexSamples> mComplexSamplesListener;
     private Listener<Heartbeat> mHeartbeatListener;
     private String mPreferredTuner;
+    private boolean mAnchored;
+    private String mOwner;
     private AtomicBoolean mChangingChannels = new AtomicBoolean();
     private boolean mStarted;
     private ConsumerSourceEventAdapter mConsumerSourceEventAdapter = new ConsumerSourceEventAdapter();
@@ -69,6 +71,8 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
         mFrequencies = frequencies;
         mChannelSpecification = channelSpecification;
         mPreferredTuner = preferredTuner;
+        mAnchored = tunerChannelSource.getTunerChannel().isAnchored();
+        mOwner = tunerChannelSource.getTunerChannel().getOwner();
     }
 
     /**
@@ -233,7 +237,10 @@ public class MultiFrequencyTunerChannelSource extends TunerChannelSource
      */
     private TunerChannel getTunerChannel(long frequency)
     {
-        return new TunerChannel(frequency, mChannelSpecification.getBandwidth());
+        TunerChannel tunerChannel = new TunerChannel(frequency, mChannelSpecification.getBandwidth());
+        tunerChannel.setAnchored(mAnchored);
+        tunerChannel.setOwner(mOwner);
+        return tunerChannel;
     }
 
     /**
