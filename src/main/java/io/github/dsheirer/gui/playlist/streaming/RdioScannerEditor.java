@@ -233,7 +233,6 @@ public class RdioScannerEditor extends AbstractBroadcastEditor<RdioScannerConfig
                 apiKeyLabel.setLabelFor(getApiKeyTextField());
                 GridPane.setHalignment(apiKeyLabel, HPos.RIGHT);
                 GridPane.setConstraints(apiKeyLabel, 0, ++row);
-                apiKeyLabel.setLabelFor(getApiKeyTextField());
                 mEditorPane.getChildren().add(apiKeyLabel);
 
                 GridPane.setConstraints(getApiKeyTextField(), 1, row);
