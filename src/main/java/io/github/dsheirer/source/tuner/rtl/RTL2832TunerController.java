@@ -42,10 +42,7 @@ import io.github.dsheirer.source.tuner.rtl.fc0012.FC0012TunerConfiguration;
 import io.github.dsheirer.source.tuner.rtl.fc0013.FC0013TunerConfiguration;
 import io.github.dsheirer.source.tuner.rtl.fc2580.FC2580TunerConfiguration;
 import io.github.dsheirer.source.tuner.rtl.r8x.R8xTunerConfiguration;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -92,8 +89,6 @@ public class RTL2832TunerController extends TunerController
     private int[] mTunerGains = new int[0];
     private boolean mBiasTEnabled = false;
     private boolean mStreaming = false;
-    private static volatile Path sNarrowIfFilterTuners;
-    private boolean mNarrowIfFilter;
 
     /**
      * Constructs an instance
@@ -463,6 +458,11 @@ public class RTL2832TunerController extends TunerController
      */
     private boolean receive(SampleBuffer buffer)
     {
+        if(!hasBufferListeners())
+        {
+            return true;
+        }
+
         try
         {
             //The buffer factory copies the samples from native memory
@@ -485,18 +485,6 @@ public class RTL2832TunerController extends TunerController
         {
             execute(device -> device.startRx(this::receive, USB_TRANSFER_BUFFER_COUNT, USB_TRANSFER_BUFFER_SIZE));
             mStreaming = mDevice != null;
-        }
-    }
-
-    /**
-     * Stops the sample stream if it's started.
-     */
-    private void stopStreaming() throws SourceException
-    {
-        if(mStreaming)
-        {
-            mStreaming = false;
-            execute(RtlSdrDevice::stopRx);
         }
     }
 
@@ -527,7 +515,8 @@ public class RTL2832TunerController extends TunerController
     }
 
     /**
-     * Removes the IQ buffer listener and stops streaming if there are no more listeners.
+     * Removes the IQ buffer listener.  Streaming continues without listeners until the tuner stops, since repeatedly
+     * starting and stopping the librtlsdr stream has crashed the JVM in libusb on Windows.
      */
     @Override
     public void removeBufferListener(Listener<INativeBuffer> listener)
@@ -537,15 +526,6 @@ public class RTL2832TunerController extends TunerController
         try
         {
             super.removeBufferListener(listener);
-
-            if(!hasBufferListeners())
-            {
-                stopStreaming();
-            }
-        }
-        catch(SourceException se)
-        {
-            mLog.error("Error stopping streaming on RTL-2832 tuner", se);
         }
         finally
         {
@@ -778,7 +758,6 @@ public class RTL2832TunerController extends TunerController
         {
             execute(device -> device.setSampleRate(sampleRate.getRate()));
             mSampleRate = sampleRate;
-            applyIfFilter(isNarrowIfFilterRequested());
             mFrequencyController.setSampleRate(sampleRate.getRate());
 
             //Updates native buffer factory so that sample buffers can be accurately timestamped
@@ -787,93 +766,6 @@ public class RTL2832TunerController extends TunerController
         finally
         {
             getLock().unlock();
-        }
-    }
-
-    /**
-     * Indicates if the embedded tuner is an R820T or R828D, whose IF filter can be narrowed to the sample rate.
-     */
-    private boolean isR8xTuner()
-    {
-        return mTunerType == TunerType.RAFAELMICRO_R820T || mTunerType == TunerType.RAFAELMICRO_R828D;
-    }
-
-    /**
-     * Narrows or widens the R8xxx IF filter when the narrow IF filter tuner list has changed for this tuner.
-     */
-    public void updateIfFilter() throws SourceException
-    {
-        boolean narrow = isNarrowIfFilterRequested();
-
-        if(narrow != mNarrowIfFilter && isR8xTuner())
-        {
-            getLock().lock();
-
-            try
-            {
-                applyIfFilter(narrow);
-            }
-            finally
-            {
-                getLock().unlock();
-            }
-        }
-    }
-
-    /**
-     * Sets the R8xxx IF filter to the narrowest bandwidth that passes the sample rate, or to the 6 MHz filter.
-     * librtlsdr narrows the filter to the sample rate by default, so tuners that aren't listed for a narrow filter
-     * are set to 6 MHz explicitly.  librtlsdr moves the IF to match the filter and retunes the tuner.
-     *
-     * @param narrow to fit the filter to the sample rate, false for the 6 MHz filter
-     */
-    private void applyIfFilter(boolean narrow) throws SourceException
-    {
-        if(isR8xTuner())
-        {
-            //A bandwidth of 0 tells librtlsdr to use the sample rate, including after later sample rate changes
-            execute(device -> device.setTunerBandwidth(narrow ? 0 : 6_000_000));
-
-            if(narrow || mNarrowIfFilter)
-            {
-                mLog.info((narrow ? "Narrow" : "Default 6 MHz") + " IF filter applied on tuner [" + getUniqueID() +
-                    "] at sample rate " + mSampleRate.getRate() + " Hz");
-            }
-
-            mNarrowIfFilter = narrow;
-        }
-    }
-
-    /**
-     * Sets the file listing tuners, by serial number or unique ID with one per line, whose R8xxx IF filter is narrowed
-     * to the sample rate.  Tuners not listed keep the default 6 MHz filter.
-     */
-    public static void setNarrowIfFilterTuners(Path path)
-    {
-        sNarrowIfFilterTuners = path;
-    }
-
-    private boolean isNarrowIfFilterRequested()
-    {
-        Path path = sNarrowIfFilterTuners;
-
-        if(path == null || !Files.isRegularFile(path))
-        {
-            return false;
-        }
-
-        String serial = mDescriptor != null && mDescriptor.hasSerial() ? mDescriptor.getSerial() : null;
-        String uniqueID = getUniqueID();
-
-        try
-        {
-            return Files.readAllLines(path).stream().map(String::trim)
-                .anyMatch(line -> !line.isEmpty() && (line.equals(serial) || line.equals(uniqueID)));
-        }
-        catch(IOException e)
-        {
-            mLog.warn("Unable to read narrow IF filter tuner list [" + path + "]", e);
-            return false;
         }
     }
 

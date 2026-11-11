@@ -63,14 +63,14 @@ public class ThinlineRadioSettingsTest
         assertEquals("number", field(fields, "frequencyCorrection").path("kind").asText());
 
         ObjectNode values = MAPPER.createObjectNode();
-        values.put("gain", 197);
+        values.put("gain", 280);
         values.put("agc", true);
         values.put("frequencyCorrection", 1.5);
         values.put("biasT", true);
         values.put("uniqueID", "changed");
         ThinlineRadioSettings.apply(configuration, values, Set.of("uniqueID"), Set.of());
 
-        assertEquals(197, configuration.getGain());
+        assertEquals(280, configuration.getGain());
         assertTrue(configuration.isAGC());
         assertEquals(1.5, configuration.getFrequencyCorrection());
         assertTrue(configuration.isBiasT());

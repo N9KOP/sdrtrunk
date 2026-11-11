@@ -49,7 +49,6 @@ import io.github.dsheirer.source.tuner.channel.TunerChannelSource;
 import io.github.dsheirer.source.tuner.configuration.TunerConfiguration;
 import io.github.dsheirer.source.tuner.configuration.TunerConfigurationManager;
 import io.github.dsheirer.source.tuner.recording.RecordingTunerConfiguration;
-import io.github.dsheirer.source.tuner.rtl.RTL2832TunerController;
 import io.github.dsheirer.source.tuner.sdrplay.DiscoveredRspTuner;
 import io.github.dsheirer.source.tuner.sdrplay.rspDuo.DiscoveredRspDuoTuner1;
 import io.github.dsheirer.source.tuner.ui.DiscoveredTunerModel;
@@ -58,7 +57,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,15 +72,14 @@ public class TunerManager implements IDiscoveredTunerStatusListener
     private final UserPreferences mUserPreferences;
     private final DiscoveredTunerModel mDiscoveredTunerModel;
     private final TunerConfigurationManager mTunerConfigurationManager;
+    private final TunerPlanner mTunerPlanner;
+    private final DecodeQualityReporter mDecodeQualityReporter;
     /**
      * libusb error code for an unspecified error (LIBUSB_ERROR_OTHER)
      */
     private static final int LIBUSB_ERROR_OTHER = -99;
     private final HotplugEventSupport mHotplugEventSupport = new HotplugEventSupport();
     private boolean mLibUsbAvailable = false;
-    private final TunerPlanner mTunerPlanner;
-    private final DecodeQualityReporter mDecodeQualityReporter;
-    private ScheduledFuture<?> mIfFilterFuture;
     private SDRplay mSDRplay;
 
     /**
@@ -121,8 +118,6 @@ public class TunerManager implements IDiscoveredTunerStatusListener
     public void start()
     {
         mLog.info("Discovering tuners ...");
-        RTL2832TunerController.setNarrowIfFilterTuners(mUserPreferences.getDirectoryPreference()
-            .getDirectoryConfiguration().resolve("narrow_if_filter_tuners.txt"));
 
         try
         {
@@ -150,31 +145,8 @@ public class TunerManager implements IDiscoveredTunerStatusListener
         discoverRecordingTuners();
         mTunerPlanner.start();
         mDecodeQualityReporter.start();
-        mIfFilterFuture = ThreadPool.SCHEDULED.scheduleAtFixedRate(this::updateIfFilters, 10, 10, TimeUnit.SECONDS);
         SimulatedNoise.start(mUserPreferences.getDirectoryPreference().getDirectoryConfiguration()
             .resolve("simulated_noise.request"));
-    }
-
-    /**
-     * Applies changes to the narrow IF filter tuner list to running RTL-2832 tuners.
-     */
-    private void updateIfFilters()
-    {
-        for(DiscoveredTuner discoveredTuner: mDiscoveredTunerModel.getAvailableTuners())
-        {
-            if(discoveredTuner.hasTuner() &&
-                discoveredTuner.getTuner().getTunerController() instanceof RTL2832TunerController controller)
-            {
-                try
-                {
-                    controller.updateIfFilter();
-                }
-                catch(Exception e)
-                {
-                    mLog.error("Unable to update IF filter on tuner [" + discoveredTuner.getId() + "]", e);
-                }
-            }
-        }
     }
 
     /**
@@ -184,15 +156,8 @@ public class TunerManager implements IDiscoveredTunerStatusListener
     {
         //Stop hotplug detection first so that no tuner is added or removed while the tuners are released
         mHotplugEventSupport.stop();
-
         SimulatedNoise.stop();
         mDecodeQualityReporter.stop();
-
-        if(mIfFilterFuture != null)
-        {
-            mIfFilterFuture.cancel(false);
-            mIfFilterFuture = null;
-        }
         mTunerPlanner.stop();
 
         //Stop all tuners
@@ -890,8 +855,9 @@ public class TunerManager implements IDiscoveredTunerStatusListener
     }
 
     /**
-     * USB hotplug support to detect when USB tuners are added or removed.  jlibusb reports changes as they happen
-     * where libusb supports hotplug (Linux and macOS) and polls the USB device list elsewhere (Windows).
+     * USB hotplug support to detect when USB tuners are added or removed, where libusb supports hotplug (Linux and
+     * macOS).  It's off elsewhere (Windows), where jlibusb would poll the USB device list every second alongside the
+     * tuners' own libusb traffic.
      *
      * Tuners already connected when detection starts are reported as arrivals too.  Those were added during discovery
      * at startup and are ignored here because the tuner model already has a tuner at that bus and port.
@@ -905,6 +871,13 @@ public class TunerManager implements IDiscoveredTunerStatusListener
          */
         public void start()
         {
+            if(!LibUsb.hasHotplug())
+            {
+                mLog.info("LibUsb - USB hotplug detection is off since this OS has no native hotplug support.  " +
+                        "Tuners are discovered at startup.");
+                return;
+            }
+
             try
             {
                 mUsbHotplug = UsbHotplug.start(device -> getSupportedTunerClass(device) != null, this);
