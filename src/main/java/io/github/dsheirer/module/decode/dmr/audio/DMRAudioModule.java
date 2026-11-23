@@ -247,7 +247,7 @@ public class DMRAudioModule extends AmbeAudioModule implements IdentifierUpdateP
         {
             IAudioWithMetadata audioWithMetadata = getAudioWithMetadata(frame.frame(), frame.correctedFrame());
             addAudio(audioWithMetadata.getAudio());
-            addVoiceFrameErrors(MbeFrameErrors.ambe(frame));
+            addVoiceFrameErrors(MbeFrameErrors.ambe(frame.frame()));
             processMetadata(audioWithMetadata, timestamp);
         }
         catch(Exception e)

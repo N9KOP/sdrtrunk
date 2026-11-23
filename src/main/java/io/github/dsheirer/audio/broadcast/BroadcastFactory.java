@@ -77,7 +77,7 @@ public class BroadcastFactory
                             inputAudioFormat, mp3Setting, aliasModel);
                 case THINLINE_RADIO_CORE:
                     return new ThinlineRadioCoreBroadcaster((ThinlineRadioCoreConfiguration)configuration, aliasModel,
-                        userPreferences);
+                        settings);
                 case OPENMHZ:
                     return new OpenMHzBroadcaster((OpenMHzConfiguration)configuration,
                         inputAudioFormat, mp3Setting, aliasModel);
