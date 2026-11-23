@@ -19,22 +19,25 @@
 package io.github.dsheirer.module.decode.p25;
 
 import io.github.dsheirer.channel.IChannelDescriptor;
-import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.Channel.ChannelType;
-import io.github.dsheirer.controller.channel.ChannelEvent;
+import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelEvent.Event;
+import io.github.dsheirer.controller.channel.ChannelEvent;
 import io.github.dsheirer.controller.channel.IChannelEventListener;
 import io.github.dsheirer.controller.channel.IChannelEventProvider;
 import io.github.dsheirer.controller.channel.event.ChannelStartProcessingRequest;
 import io.github.dsheirer.alias.AliasList;
 import io.github.dsheirer.identifier.Form;
 import io.github.dsheirer.identifier.Identifier;
+import io.github.dsheirer.identifier.IdentifierClass;
 import io.github.dsheirer.identifier.IdentifierCollection;
 import io.github.dsheirer.identifier.MutableIdentifierCollection;
+import io.github.dsheirer.identifier.Role;
 import io.github.dsheirer.identifier.alias.TalkerAliasManager;
 import io.github.dsheirer.identifier.encryption.EncryptionKeyIdentifier;
 import io.github.dsheirer.identifier.patch.PatchGroupIdentifier;
 import io.github.dsheirer.identifier.patch.PatchGroupPreLoadDataContent;
+import io.github.dsheirer.identifier.radio.RadioIdentifier;
 import io.github.dsheirer.identifier.scramble.ScrambleParameterIdentifier;
 import io.github.dsheirer.identifier.talkgroup.TalkgroupIdentifier;
 import io.github.dsheirer.log.LoggingSuppressor;
@@ -65,7 +68,6 @@ import io.github.dsheirer.module.decode.p25.reference.DataServiceOptions;
 import io.github.dsheirer.module.decode.p25.reference.ServiceOptions;
 import io.github.dsheirer.module.decode.p25.reference.VoiceServiceOptions;
 import io.github.dsheirer.module.decode.traffic.TrafficChannelManager;
-import io.github.dsheirer.preference.decoder.TrafficChannelPreference;
 import io.github.dsheirer.sample.Listener;
 import io.github.dsheirer.source.config.SourceConfigTuner;
 import java.util.ArrayList;
@@ -128,8 +130,8 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
     private Listener<IMessage> mMessageListener;
     private boolean mIgnoreDataCalls;
     private AliasList mAliasList;
-    private TrafficChannelPreference mTrafficChannelPreference;
     private boolean mIgnoreEncryptedCalls;
+    private boolean mIgnoreUnaliasedTalkgroups;
     //Used only for data calls
     private final DecodeEventDuplicateDetector mDuplicateDetector = new DecodeEventDuplicateDetector();
     private final TalkerAliasManager mTalkerAliasManager = new TalkerAliasManager();
@@ -146,6 +148,7 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
         {
             mIgnoreDataCalls = phase1.getIgnoreDataCalls();
             mIgnoreEncryptedCalls = phase1.getIgnoreEncryptedCalls();
+            mIgnoreUnaliasedTalkgroups = phase1.getIgnoreUnaliasedTalkgroups();
             createPhase1TrafficChannels(phase1.getTrafficChannelPoolSize(), phase1);
             DecodeConfigP25Phase2 phase2 = new DecodeConfigP25Phase2();
             DecoderFactory.transferJMBESettings(phase1, phase2);
@@ -155,6 +158,7 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
         {
             mIgnoreDataCalls = phase2.getIgnoreDataCalls();
             mIgnoreEncryptedCalls = phase2.getIgnoreEncryptedCalls();
+            mIgnoreUnaliasedTalkgroups = phase2.getIgnoreUnaliasedTalkgroups();
             DecodeConfigP25Phase1 phase1 = new DecodeConfigP25Phase1();
             DecoderFactory.transferJMBESettings(phase2, phase1);
             createPhase1TrafficChannels(phase2.getTrafficChannelPoolSize(), phase1);
@@ -948,6 +952,43 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
     }
 
     /**
+     * Adds a talker alias that completed after the call ended (e.g. a P25 Phase 1 L3Harris talker alias in the TDULC
+     * messages) to the call event that just ended on the frequency and timeslot, when that event's FROM radio is the
+     * talker.  The event duration isn't changed.
+     *
+     * @param frequency of the traffic channel
+     * @param timeslot of the traffic channel (TIMESLOT_1 for Phase 1)
+     * @param radio that the talker alias belongs to
+     * @param talkerAlias to add
+     */
+    public void processTrafficTalkerAliasAfterCall(long frequency, int timeslot, RadioIdentifier radio,
+                                                   Identifier talkerAlias)
+    {
+        mLock.lock();
+
+        try
+        {
+            P25ChannelEventTracker tracker = getTracker(frequency, timeslot);
+
+            if(tracker != null && tracker.isComplete() && radio != null && talkerAlias != null)
+            {
+                Identifier from = tracker.getEvent().getIdentifierCollection()
+                        .getIdentifier(IdentifierClass.USER, Form.RADIO, Role.FROM);
+
+                if(from instanceof RadioIdentifier eventRadio && eventRadio.getValue().equals(radio.getValue()))
+                {
+                    tracker.addIdentifierIfMissing(talkerAlias);
+                    broadcast(tracker);
+                }
+            }
+        }
+        finally
+        {
+            mLock.unlock();
+        }
+    }
+
+    /**
      * Updates all current identifiers for an ongoing call event on the frequency and updates the event duration timestamp.
      *
      * Note: if this manager does not have an existing call event for the frequency, the update is ignored
@@ -1234,19 +1275,17 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
     }
 
     /**
-     * Sets the control channel's alias list and the preference that decides whether talkgroups without an alias in
-     * that list are tuned.
+     * Sets the control channel's alias list, used to identify unaliased talkgroups when the channel is configured to
+     * ignore them.
      */
-    public void setTalkgroupFilter(AliasList aliasList, TrafficChannelPreference trafficChannelPreference)
+    public void setAliasList(AliasList aliasList)
     {
         mAliasList = aliasList;
-        mTrafficChannelPreference = trafficChannelPreference;
     }
 
     private boolean isUnaliasedTalkgroup(IdentifierCollection ic)
     {
-        if(mAliasList == null || mTrafficChannelPreference == null ||
-            !mTrafficChannelPreference.isIgnoreUnaliasedTalkgroups())
+        if(!mIgnoreUnaliasedTalkgroups || mAliasList == null)
         {
             return false;
         }
