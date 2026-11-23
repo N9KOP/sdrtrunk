@@ -27,8 +27,8 @@ import ch.qos.logback.core.rolling.RollingFileAppender;
 import ch.qos.logback.core.rolling.TimeBasedRollingPolicy;
 import com.google.common.eventbus.Subscribe;
 import io.github.dsheirer.eventbus.MyEventBus;
-import io.github.dsheirer.preference.PreferenceType;
-import io.github.dsheirer.preference.UserPreferences;
+import io.github.dsheirer.settings.SettingsType;
+import io.github.dsheirer.settings.Settings;
 import java.nio.file.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,21 +45,21 @@ public class ThinlineRadioLog
     private static final int LOG_MAX_HISTORY = 30;
     private static final String APPENDER_NAME = "THINLINE_CORE_FILE";
 
-    private final UserPreferences mUserPreferences;
+    private final Settings mUserPreferences;
     private RollingFileAppender mRollingFileAppender;
     private Path mLogDirectory;
 
-    public ThinlineRadioLog(UserPreferences userPreferences)
+    public ThinlineRadioLog(Settings userPreferences)
     {
         mUserPreferences = userPreferences;
     }
 
     @Subscribe
-    public void preferenceUpdated(PreferenceType preferenceType)
+    public void preferenceUpdated(SettingsType preferenceType)
     {
-        if(preferenceType == PreferenceType.DIRECTORY && mRollingFileAppender != null && mLogDirectory != null)
+        if(preferenceType == SettingsType.DIRECTORY && mRollingFileAppender != null && mLogDirectory != null)
         {
-            Path next = mUserPreferences.getDirectoryPreference().getDirectoryApplicationLog();
+            Path next = mUserPreferences.getDirectorySettings().getDirectoryApplicationLog();
             if(!next.equals(mLogDirectory))
             {
                 mLog.info("Thinline Radio log directory changed [{}] - restarting", next);
@@ -78,7 +78,7 @@ public class ThinlineRadioLog
             return;
         }
 
-        mLogDirectory = mUserPreferences.getDirectoryPreference().getDirectoryApplicationLog();
+        mLogDirectory = mUserPreferences.getDirectorySettings().getDirectoryApplicationLog();
         Path logfile = mLogDirectory.resolve(LOG_FILENAME);
         mLog.info("Thinline Radio Log File: {}", logfile);
 

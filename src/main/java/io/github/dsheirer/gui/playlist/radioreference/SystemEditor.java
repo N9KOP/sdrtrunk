@@ -20,7 +20,7 @@
 package io.github.dsheirer.gui.playlist.radioreference;
 
 import io.github.dsheirer.playlist.PlaylistManager;
-import io.github.dsheirer.preference.UserPreferences;
+import io.github.dsheirer.settings.Settings;
 import io.github.dsheirer.rrapi.RadioReferenceException;
 import io.github.dsheirer.rrapi.type.CountyInfo;
 import io.github.dsheirer.rrapi.type.Flavor;
@@ -67,7 +67,7 @@ public class SystemEditor extends VBox
 {
     private static final Logger mLog = LoggerFactory.getLogger(SystemEditor.class);
 
-    private UserPreferences mUserPreferences;
+    private Settings mSettings;
     private RadioReference mRadioReference;
     private PlaylistManager mPlaylistManager;
     private Level mLevel;
@@ -82,15 +82,15 @@ public class SystemEditor extends VBox
 
     /**
      * Constructs an instance
-     * @param userPreferences for preferences
+     * @param settings for preferences
      * @param radioReference to access radio reference
      * @param playlistManager
      * @param level STATE or COUNTY
      */
-    public SystemEditor(UserPreferences userPreferences, RadioReference radioReference,
+    public SystemEditor(Settings settings, RadioReference radioReference,
                         PlaylistManager playlistManager, Level level)
     {
-        mUserPreferences = userPreferences;
+        mSettings = settings;
         mRadioReference = radioReference;
         mPlaylistManager = playlistManager;
         mLevel = level;
@@ -143,7 +143,7 @@ public class SystemEditor extends VBox
             getSystemComboBox().getItems().addAll(systems);
             getSystemComboBox().getItems().sort(new SystemComparator());
 
-            int preferredSystemId = mUserPreferences.getRadioReferencePreference().getPreferredSystemId(mLevel);
+            int preferredSystemId = mSettings.getRadioReferenceSettings().getPreferredSystemId(mLevel);
 
             for(System system: getSystemComboBox().getItems())
             {
@@ -154,6 +154,41 @@ public class SystemEditor extends VBox
                 }
             }
         }
+    }
+
+    /**
+     * Prepares to show the system with the site selected when the systems are next set.
+     * @param systemId of the system
+     * @param siteId to select, or -1 for none
+     */
+    public void prepareView(int systemId, int siteId)
+    {
+        mSettings.getRadioReferenceSettings().setPreferredSystemId(systemId, mLevel);
+        getTabPane().getSelectionModel().select(getSystemTab());
+        getSystemSiteSelectionEditor().viewSite(systemId, siteId);
+    }
+
+    /**
+     * Shows the system with the site selected
+     * @param systemId of the system
+     * @param siteId to select, or -1 for none
+     * @return false when the editor doesn't list the system
+     */
+    public boolean view(int systemId, int siteId)
+    {
+        prepareView(systemId, siteId);
+
+        for(System system: getSystemComboBox().getItems())
+        {
+            if(system.getSystemId() == systemId)
+            {
+                //Selecting the shown system again doesn't reload it - the site is selected in the shown system
+                getSystemComboBox().getSelectionModel().select(system);
+                return true;
+            }
+        }
+
+        return getSystemComboBox().getItems().isEmpty();
     }
 
     private TabPane getTabPane()
@@ -173,7 +208,7 @@ public class SystemEditor extends VBox
     {
         if(mSystemSiteSelectionEditor == null)
         {
-            mSystemSiteSelectionEditor = new SystemSiteSelectionEditor(mUserPreferences, mPlaylistManager);
+            mSystemSiteSelectionEditor = new SystemSiteSelectionEditor(mSettings, mPlaylistManager);
         }
 
         return mSystemSiteSelectionEditor;
@@ -194,7 +229,7 @@ public class SystemEditor extends VBox
     {
         if(mSystemTalkgroupSelectionEditor == null)
         {
-            mSystemTalkgroupSelectionEditor = new SystemTalkgroupSelectionEditor(mUserPreferences, mPlaylistManager);
+            mSystemTalkgroupSelectionEditor = new SystemTalkgroupSelectionEditor(mSettings, mPlaylistManager);
         }
 
         return mSystemTalkgroupSelectionEditor;
@@ -275,7 +310,7 @@ public class SystemEditor extends VBox
             getSystemSiteSelectionEditor().clearAndSetLoading();
             getSystemTalkgroupSelectionEditor().clearAndSetLoading();
 
-            mUserPreferences.getRadioReferencePreference().setPreferredSystemId(system.getSystemId(), mLevel);
+            mSettings.getRadioReferenceSettings().setPreferredSystemId(system.getSystemId(), mLevel);
 
             //Retrieve the radio reference data on a separate thread and then load the editors on the FX thread
             ThreadPool.CACHED.execute(() -> {
@@ -359,7 +394,7 @@ public class SystemEditor extends VBox
         Map<Integer, Flavor> flavorMap = mRadioReference.getService().getFlavorsMap();
         Map<Integer, Voice> voiceMap = mRadioReference.getService().getVoicesMap();
         Map<Integer, Tag> tagMap = mRadioReference.getService().getTagsMap();
-        mRadioReferenceDecoder = new RadioReferenceDecoder(mUserPreferences, typeMap, flavorMap,
+        mRadioReferenceDecoder = new RadioReferenceDecoder(mSettings, typeMap, flavorMap,
                 voiceMap, tagMap);
     }
 

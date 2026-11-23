@@ -18,7 +18,7 @@
  */
 package io.github.dsheirer.source.tuner.manager;
 
-import io.github.dsheirer.preference.directory.DirectoryPreference;
+import io.github.dsheirer.settings.directory.DirectorySettings;
 import io.github.dsheirer.source.tuner.TunerController;
 import io.github.dsheirer.source.tuner.channel.TunerChannel;
 import io.github.dsheirer.source.tuner.ui.DiscoveredTunerModel;
@@ -66,7 +66,7 @@ public class TunerPlanner
      * @param discoveredTunerModel for the tuners and their channels
      * @param directoryPreference for the location of the learned traffic frequency file
      */
-    public TunerPlanner(DiscoveredTunerModel discoveredTunerModel, DirectoryPreference directoryPreference)
+    public TunerPlanner(DiscoveredTunerModel discoveredTunerModel, DirectorySettings directoryPreference)
     {
         mDiscoveredTunerModel = discoveredTunerModel;
         Path logPath = directoryPreference.getDirectoryConfiguration().resolve(TRAFFIC_FREQUENCY_FILE);

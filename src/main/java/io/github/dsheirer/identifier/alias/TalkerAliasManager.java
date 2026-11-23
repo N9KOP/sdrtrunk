@@ -26,11 +26,13 @@ import io.github.dsheirer.identifier.IdentifierCollection;
 import io.github.dsheirer.identifier.MutableIdentifierCollection;
 import io.github.dsheirer.identifier.Role;
 import io.github.dsheirer.identifier.radio.RadioIdentifier;
+import io.github.dsheirer.module.decode.event.ActivitySummary;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 
 /**
  * Talker alias cache manager.  Collects observed talker aliases and inserts them into an identifier collection when
@@ -41,12 +43,23 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TalkerAliasManager
 {
     private Map<Integer,TalkerAliasIdentifier> mAliasMap = new ConcurrentHashMap<>();
+    private volatile BiConsumer<RadioIdentifier,TalkerAliasIdentifier> mTalkerAliasListener;
 
     /**
      * Constructs an instance
      */
     public TalkerAliasManager()
     {
+    }
+
+    /**
+     * Sets an optional listener to receive each talker alias that is assigned to a radio, e.g. to automatically add
+     * talker aliases to an alias list.  The listener is invoked on the calling decoder thread.
+     * @param listener to receive radio and talker alias updates, or null to clear the listener.
+     */
+    public void setTalkerAliasListener(BiConsumer<RadioIdentifier,TalkerAliasIdentifier> listener)
+    {
+        mTalkerAliasListener = listener;
     }
 
     /**
@@ -60,6 +73,13 @@ public class TalkerAliasManager
         if(identifier.getRole() == Role.FROM)
         {
             mAliasMap.put(identifier.getValue(), alias);
+
+            BiConsumer<RadioIdentifier,TalkerAliasIdentifier> listener = mTalkerAliasListener;
+
+            if(listener != null && alias != null)
+            {
+                listener.accept(identifier, alias);
+            }
         }
     }
 
@@ -129,31 +149,20 @@ public class TalkerAliasManager
     }
 
     /**
-     * Creates a summary listing of talker aliases
-     * @return summary.
+     * Adds a talker alias section to the activity summary listing each radio and talker alias in radio order.
+     * @param summary to add to
      */
-    public synchronized String getAliasSummary()
+    public synchronized void addAliasSummary(ActivitySummary summary)
     {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Active System Radio Aliases\n");
-        sb.append("  Radio\tTalker Alias (TA-)\n");
+        summary.section("Talker Aliases");
+        ActivitySummary.Table table = summary.table("Radio", "Talker Alias");
         List<Integer> radios = new ArrayList<>(mAliasMap.keySet());
+        Collections.sort(radios);
 
-        if(radios.size() > 0)
+        for(Integer radio : radios)
         {
-            Collections.sort(radios);
-            for(Integer radio : radios)
-            {
-                sb.append("  ").append(radio);
-                sb.append("\t").append(mAliasMap.get(radio));
-                sb.append("\n");
-            }
+            TalkerAliasIdentifier alias = mAliasMap.get(radio);
+            table.row(radio, alias != null ? alias.getValue() : null);
         }
-        else
-        {
-            sb.append("  None\n");
-        }
-
-        return sb.toString();
     }
 }

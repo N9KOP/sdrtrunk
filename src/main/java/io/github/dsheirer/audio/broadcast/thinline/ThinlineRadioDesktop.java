@@ -23,9 +23,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.dsheirer.audio.playback.AudioOutput;
-import java.awt.Frame;
 import java.awt.Graphics2D;
-import java.awt.GraphicsConfiguration;
+import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.Robot;
@@ -38,13 +37,14 @@ import java.util.Iterator;
 import java.util.Base64;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
+import javafx.application.Platform;
+import javafx.stage.Stage;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.MemoryCacheImageOutputStream;
-import javax.swing.JFrame;
-import javax.swing.SwingUtilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +58,7 @@ class ThinlineRadioDesktop
     private static final int MAX_WIDTH = 3840;
     private static final long FRAME_MS = 200;
 
-    private final JFrame mFrame;
+    private final Supplier<Stage> mStage;
     private final Predicate<ObjectNode> mSend;
     private final Consumer<ObjectNode> mQueue;
     private final BooleanSupplier mReady;
@@ -76,9 +76,9 @@ class ThinlineRadioDesktop
     private int mAudioChannels = 1;
     private int mAudioRate = 8000;
 
-    ThinlineRadioDesktop(JFrame frame, Predicate<ObjectNode> send, Consumer<ObjectNode> queue, BooleanSupplier ready)
+    ThinlineRadioDesktop(Supplier<Stage> stage, Predicate<ObjectNode> send, Consumer<ObjectNode> queue, BooleanSupplier ready)
     {
-        mFrame = frame;
+        mStage = stage != null ? stage : () -> null;
         mSend = send;
         mQueue = queue;
         mReady = ready;
@@ -167,17 +167,18 @@ class ThinlineRadioDesktop
 
     private void raiseFrame()
     {
-        if(mFrame == null)
+        Stage stage = mStage.get();
+        if(stage == null)
         {
             return;
         }
-        SwingUtilities.invokeLater(() -> {
-            if((mFrame.getExtendedState() & Frame.ICONIFIED) == Frame.ICONIFIED)
+        Platform.runLater(() -> {
+            if(stage.isIconified())
             {
-                mFrame.setExtendedState(Frame.NORMAL);
+                stage.setIconified(false);
             }
-            mFrame.setVisible(true);
-            mFrame.toFront();
+            stage.show();
+            stage.toFront();
         });
     }
 
@@ -297,12 +298,19 @@ class ThinlineRadioDesktop
 
     private Rectangle screenBounds()
     {
-        if(mFrame != null)
+        Stage stage = mStage.get();
+        if(stage != null && !Double.isNaN(stage.getX()) && !Double.isNaN(stage.getY()))
         {
-            GraphicsConfiguration configuration = mFrame.getGraphicsConfiguration();
-            if(configuration != null)
+            //The screen that holds the center of the main window
+            int x = (int)(stage.getX() + stage.getWidth() / 2);
+            int y = (int)(stage.getY() + stage.getHeight() / 2);
+            for(GraphicsDevice device: GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices())
             {
-                return configuration.getBounds();
+                Rectangle bounds = device.getDefaultConfiguration().getBounds();
+                if(bounds.contains(x, y))
+                {
+                    return bounds;
+                }
             }
         }
         return GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDefaultConfiguration().getBounds();

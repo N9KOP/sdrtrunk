@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.dsheirer.preference.thinline.ThinlineRadioPreference.Remote;
+import io.github.dsheirer.settings.thinline.ThinlineRadioPreference.Remote;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

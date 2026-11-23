@@ -39,8 +39,8 @@ import io.github.dsheirer.controller.channel.ChannelModel;
 import io.github.dsheirer.controller.channel.ChannelProcessingManager;
 import io.github.dsheirer.module.ProcessingChain;
 import io.github.dsheirer.module.decode.DecoderType;
-import io.github.dsheirer.preference.UserPreferences;
-import io.github.dsheirer.preference.thinline.ThinlineRadioPreference;
+import io.github.dsheirer.settings.Settings;
+import io.github.dsheirer.settings.thinline.ThinlineRadioPreference;
 import io.github.dsheirer.properties.SystemProperties;
 import io.github.dsheirer.source.tuner.Tuner;
 import io.github.dsheirer.source.tuner.manager.DiscoveredTuner;
@@ -51,8 +51,9 @@ import java.net.URI;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import javax.swing.JFrame;
+import java.util.function.Supplier;
 import javafx.application.Platform;
+import javafx.stage.Stage;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -89,7 +90,7 @@ public class ThinlineRadioHealthReporter
         DecoderType.LTR_NET, DecoderType.MPT1327, DecoderType.NXDN, DecoderType.PASSPORT, DecoderType.P25_PHASE1,
         DecoderType.P25_PHASE2);
 
-    private final UserPreferences mUserPreferences;
+    private final Settings mUserPreferences;
     private final BroadcastModel mBroadcastModel;
     private final ChannelModel mChannelModel;
     private final ChannelProcessingManager mChannelProcessingManager;
@@ -112,10 +113,10 @@ public class ThinlineRadioHealthReporter
     private String mLastSignature = "";
     private boolean mSiteReporting;
 
-    public ThinlineRadioHealthReporter(UserPreferences userPreferences, BroadcastModel broadcastModel,
+    public ThinlineRadioHealthReporter(Settings userPreferences, BroadcastModel broadcastModel,
                                        ChannelModel channelModel, ChannelProcessingManager channelProcessingManager,
                                        TunerManager tunerManager, AliasModel aliasModel, ChannelMapModel channelMapModel,
-                                       JFrame frame)
+                                       Supplier<Stage> stage)
     {
         mUserPreferences = userPreferences;
         mBroadcastModel = broadcastModel;
@@ -125,7 +126,7 @@ public class ThinlineRadioHealthReporter
         mControl = new ThinlineRadioControl(userPreferences, broadcastModel, channelModel, channelProcessingManager,
             tunerManager, aliasModel, channelMapModel, node -> mSocket.send(node), this::snapshotBroadcasts,
             this::remotePermissions);
-        mDesktop = new ThinlineRadioDesktop(frame, mSocket::trySend, mSocket::send, mSocket::isReady);
+        mDesktop = new ThinlineRadioDesktop(stage, mSocket::trySend, mSocket::send, mSocket::isReady);
     }
 
     public void start()

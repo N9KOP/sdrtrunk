@@ -19,7 +19,7 @@
 package io.github.dsheirer.source.tuner.manager;
 
 import io.github.dsheirer.module.decode.DecodeQuality;
-import io.github.dsheirer.preference.source.TunerPreference;
+import io.github.dsheirer.settings.source.TunerSettings;
 import io.github.dsheirer.source.tuner.TunerController;
 import io.github.dsheirer.source.tuner.channel.TunerChannel;
 import io.github.dsheirer.source.tuner.ui.DiscoveredTunerModel;
@@ -41,7 +41,7 @@ public class DecodeQualityReporter
     private static final long REPORT_INTERVAL_SECONDS = TimeUnit.MINUTES.toSeconds(5);
 
     private final DiscoveredTunerModel mDiscoveredTunerModel;
-    private final TunerPreference mTunerPreference;
+    private final TunerSettings mTunerPreference;
     private final Map<String, DecodeQuality.Sample> mLastReport = new HashMap<>();
     private ScheduledFuture<?> mFuture;
 
@@ -50,7 +50,7 @@ public class DecodeQualityReporter
      * @param discoveredTunerModel for the tuners and their channels
      * @param tunerPreference to enable or disable the logging
      */
-    public DecodeQualityReporter(DiscoveredTunerModel discoveredTunerModel, TunerPreference tunerPreference)
+    public DecodeQualityReporter(DiscoveredTunerModel discoveredTunerModel, TunerSettings tunerPreference)
     {
         mDiscoveredTunerModel = discoveredTunerModel;
         mTunerPreference = tunerPreference;

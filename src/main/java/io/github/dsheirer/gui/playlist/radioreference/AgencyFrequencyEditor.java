@@ -20,7 +20,7 @@
 package io.github.dsheirer.gui.playlist.radioreference;
 
 import io.github.dsheirer.playlist.PlaylistManager;
-import io.github.dsheirer.preference.UserPreferences;
+import io.github.dsheirer.settings.Settings;
 import io.github.dsheirer.rrapi.RadioReferenceException;
 import io.github.dsheirer.rrapi.type.Category;
 import io.github.dsheirer.rrapi.type.Frequency;
@@ -62,21 +62,36 @@ public class AgencyFrequencyEditor extends GridPane
     private static final Category ALL_CATEGORIES = new AllCategories();
     private static final SubCategory ALL_SUB_CATEGORIES = new AllSubCategories();
 
-    private UserPreferences mUserPreferences;
+    private Settings mSettings;
     private RadioReference mRadioReference;
     private PlaylistManager mPlaylistManager;
     private Level mLevel;
     private ComboBox<Category> mCategoryComboBox;
     private ComboBox<SubCategory> mSubCategoryComboBox;
+    private FrequencyTarget mPendingFrequency;
+    private boolean mLoadingFrequencies;
+
+    /**
+     * Frequency to select in the editor
+     * @param category name, or null
+     * @param subCategory name, or null
+     * @param frequencyHz downlink frequency
+     * @param description of the frequency, or null
+     * @param alphaTag of the frequency, or null
+     */
+    public record FrequencyTarget(String category, String subCategory, long frequencyHz, String description,
+                                  String alphaTag)
+    {
+    }
     private TableView<Frequency> mFrequencyTableView;
     private Label mPlaceholderLabel;
     private ProgressIndicator mProgressIndicator;
     private FrequencyEditor mFrequencyEditor;
 
-    public AgencyFrequencyEditor(UserPreferences userPreferences, RadioReference radioReference,
+    public AgencyFrequencyEditor(Settings settings, RadioReference radioReference,
                                  PlaylistManager playlistManager, Level level)
     {
-        mUserPreferences = userPreferences;
+        mSettings = settings;
         mRadioReference = radioReference;
         mPlaylistManager = playlistManager;
         mLevel = level;
@@ -165,7 +180,11 @@ public class AgencyFrequencyEditor extends GridPane
                 sorted.add(0, ALL_CATEGORIES);
             }
             getCategoryComboBox().getItems().addAll(sorted);
-            getCategoryComboBox().getSelectionModel().select(sorted.get(0));
+
+            if(mPendingFrequency == null || !selectPendingFrequency())
+            {
+                getCategoryComboBox().getSelectionModel().select(sorted.get(0));
+            }
         }
         else
         {
@@ -173,11 +192,120 @@ public class AgencyFrequencyEditor extends GridPane
         }
     }
 
+    /**
+     * Selects the frequency in its category and subcategory, now or once the categories are set
+     */
+    public void viewFrequency(FrequencyTarget target)
+    {
+        mPendingFrequency = target;
+
+        if(!getCategoryComboBox().getItems().isEmpty())
+        {
+            selectPendingFrequency();
+        }
+    }
+
+    /**
+     * Selects the pending frequency's category and subcategory, which loads the frequencies, or selects the frequency
+     * when they're already shown.
+     * @return false when the categories don't include the frequency's category
+     */
+    private boolean selectPendingFrequency()
+    {
+        FrequencyTarget target = mPendingFrequency;
+        Category category = null;
+
+        for(Category candidate: getCategoryComboBox().getItems())
+        {
+            if(candidate != ALL_CATEGORIES && candidate.getName() != null &&
+                candidate.getName().equals(target.category()))
+            {
+                category = candidate;
+            }
+        }
+
+        if(category == null)
+        {
+            mPendingFrequency = null;
+            return false;
+        }
+
+        if(getCategoryComboBox().getValue() != category)
+        {
+            getCategoryComboBox().getSelectionModel().select(category);
+        }
+
+        SubCategory subCategory = null;
+
+        for(SubCategory candidate: getSubCategoryComboBox().getItems())
+        {
+            if(candidate != ALL_SUB_CATEGORIES && candidate.getName() != null &&
+                candidate.getName().equals(target.subCategory()))
+            {
+                subCategory = candidate;
+            }
+        }
+
+        if(subCategory != null && getSubCategoryComboBox().getValue() != subCategory)
+        {
+            //Loading the subcategory frequencies selects the frequency
+            getSubCategoryComboBox().getSelectionModel().select(subCategory);
+        }
+        else if(!mLoadingFrequencies)
+        {
+            selectFrequency();
+        }
+
+        return true;
+    }
+
+    /**
+     * Selects the pending frequency in the frequencies table: the one with the same description or alpha tag, or else
+     * the first one with the same frequency
+     */
+    private void selectFrequency()
+    {
+        FrequencyTarget target = mPendingFrequency;
+        mPendingFrequency = null;
+
+        if(target == null)
+        {
+            return;
+        }
+
+        Frequency match = null;
+
+        for(Frequency frequency: getFrequencyTableView().getItems())
+        {
+            if(frequency.getDownlinkHz() == target.frequencyHz())
+            {
+                boolean same = (target.description() != null && target.description().equals(frequency.getDescription())) ||
+                    (target.alphaTag() != null && target.alphaTag().equals(frequency.getAlphaTag()));
+
+                if(same)
+                {
+                    match = frequency;
+                    break;
+                }
+                else if(match == null)
+                {
+                    match = frequency;
+                }
+            }
+        }
+
+        if(match != null)
+        {
+            getFrequencyTableView().getSelectionModel().select(match);
+            getFrequencyTableView().scrollTo(match);
+        }
+    }
+
     private FrequencyEditor getFrequencyEditor()
     {
         if(mFrequencyEditor == null)
         {
-            mFrequencyEditor = new FrequencyEditor(mUserPreferences, mRadioReference, mPlaylistManager, mLevel);
+            mFrequencyEditor = new FrequencyEditor(mSettings, mRadioReference, mPlaylistManager, mLevel);
         }
 
         return mFrequencyEditor;
@@ -400,6 +528,7 @@ public class AgencyFrequencyEditor extends GridPane
                 getFrequencyTableView().getItems().clear();
 
                 SubCategory subCategory = mSubCategoryComboBox.getValue();
+                mLoadingFrequencies = subCategory != null;
 
                 if(subCategory != null)
                 {
@@ -453,14 +582,23 @@ public class AgencyFrequencyEditor extends GridPane
                             }
 
                             Platform.runLater(() -> {
+                                //Another subcategory was selected while loading - its frequencies are shown instead
+                                if(getSubCategoryComboBox().getValue() != subCategory)
+                                {
+                                    return;
+                                }
+
+                                mLoadingFrequencies = false;
                                 getFrequencyTableView().getItems().addAll(frequencies);
                                 setLoading(false);
+                                selectFrequency();
                             });
                         }
                         catch(Throwable t)
                         {
                             mLog.error("Error retrieving frequencies for subcategory [" + subCategory.getName() + "]", t);
                             Platform.runLater(() -> {
+                                mLoadingFrequencies = false;
                                 setLoading(false);
                                 new RadioReferenceUnavailableAlert(getSubCategoryComboBox()).showAndWait();
                             });

@@ -170,6 +170,7 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
      * Talker alias manager
      * @return manager
      */
+    @Override
     public TalkerAliasManager getTalkerAliasManager()
     {
         return mTalkerAliasManager;

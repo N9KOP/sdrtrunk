@@ -22,9 +22,9 @@ package io.github.dsheirer.service.radioreference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.eventbus.Subscribe;
 import io.github.dsheirer.eventbus.MyEventBus;
-import io.github.dsheirer.preference.PreferenceType;
-import io.github.dsheirer.preference.UserPreferences;
-import io.github.dsheirer.preference.radioreference.RadioReferencePreference;
+import io.github.dsheirer.settings.SettingsType;
+import io.github.dsheirer.settings.Settings;
+import io.github.dsheirer.settings.radioreference.RadioReferenceSettings;
 import io.github.dsheirer.properties.SystemProperties;
 import io.github.dsheirer.rrapi.RadioReferenceException;
 import io.github.dsheirer.rrapi.RadioReferenceJson;
@@ -112,7 +112,7 @@ public class RadioReferenceFrequencyIndex
     private static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(10);
 
     private final RadioReference mRadioReference;
-    private final UserPreferences mUserPreferences;
+    private final Settings mSettings;
     private final ReadOnlyStringWrapper mStatus = new ReadOnlyStringWrapper("Not started");
     private final AtomicBoolean mStarted = new AtomicBoolean();
     private final AtomicLong mGeneration = new AtomicLong();
@@ -123,6 +123,8 @@ public class RadioReferenceFrequencyIndex
     });
     private volatile NavigableMap<Long,List<FrequencyCandidate>> mFrequencies = Collections.emptyNavigableMap();
     private volatile List<SiteRecord> mSites = Collections.emptyList();
+    //Key of the source (county:123 or agency:789) that lists each conventional frequency
+    private volatile Map<FrequencyCandidate,String> mSourceKeys = Collections.emptyMap();
     private final List<Runnable> mUpdateListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile BuildParameters mParameters;
     private volatile long mRefreshed;
@@ -243,12 +245,12 @@ public class RadioReferenceFrequencyIndex
     /**
      * Constructs an instance
      * @param radioReference service
-     * @param userPreferences for the user's location
+     * @param settings for the user's location
      */
-    public RadioReferenceFrequencyIndex(RadioReference radioReference, UserPreferences userPreferences)
+    public RadioReferenceFrequencyIndex(RadioReference radioReference, Settings settings)
     {
         mRadioReference = radioReference;
-        mUserPreferences = userPreferences;
+        mSettings = settings;
     }
 
     /**
@@ -281,9 +283,9 @@ public class RadioReferenceFrequencyIndex
      * Rebuilds the index when the user's location changes
      */
     @Subscribe
-    public void preferenceUpdated(PreferenceType preferenceType)
+    public void settingsUpdated(SettingsType settingsType)
     {
-        if(preferenceType == PreferenceType.RADIO_REFERENCE)
+        if(settingsType == SettingsType.RADIO_REFERENCE)
         {
             update();
         }
@@ -294,7 +296,7 @@ public class RadioReferenceFrequencyIndex
      */
     private synchronized void update()
     {
-        RadioReferencePreference.Location location = mUserPreferences.getRadioReferencePreference().getLocation();
+        RadioReferenceSettings.Location location = mSettings.getRadioReferenceSettings().getLocation();
 
         if(!mRadioReference.premiumAccountProperty().get())
         {
@@ -308,6 +310,7 @@ public class RadioReferenceFrequencyIndex
             stopBuild();
             mFrequencies = Collections.emptyNavigableMap();
             mSites = Collections.emptyList();
+            mSourceKeys = Collections.emptyMap();
             mParameters = null;
             notifyUpdated();
             setStatus("Set your location in the playlist editor's Radio Reference tab");
@@ -349,7 +352,7 @@ public class RadioReferenceFrequencyIndex
      */
     public List<RankedCandidate> lookup(long frequency, long toleranceHz)
     {
-        RadioReferencePreference.Location location = mUserPreferences.getRadioReferencePreference().getLocation();
+        RadioReferenceSettings.Location location = mSettings.getRadioReferenceSettings().getLocation();
 
         if(location == null || !mRadioReference.premiumAccountProperty().get())
         {
@@ -1106,6 +1109,16 @@ public class RadioReferenceFrequencyIndex
     }
 
     /**
+     * Key of the radio reference source that lists the conventional frequency: county:123 for a county's frequencies
+     * or agency:789 for an agency's frequencies.  Can be called from any thread.
+     * @return key, or null when the index doesn't have the candidate or it's a trunked site frequency
+     */
+    public String getSourceKey(FrequencyCandidate candidate)
+    {
+        return candidate != null ? mSourceKeys.get(candidate) : null;
+    }
+
+    /**
      * Site record by system and site id
      * @return site, or null when the index doesn't have it
      */
@@ -1280,13 +1293,23 @@ public class RadioReferenceFrequencyIndex
         {
             mFrequencies = toFrequencies(sources);
             List<SiteRecord> sites = new ArrayList<>();
+            Map<FrequencyCandidate,String> sourceKeys = new HashMap<>();
 
             for(Source source: sources)
             {
                 sites.addAll(nonNull(source.sites()));
+
+                if(!source.isSystem())
+                {
+                    for(FrequencyCandidate candidate: nonNull(source.candidates()))
+                    {
+                        sourceKeys.putIfAbsent(candidate, source.key());
+                    }
+                }
             }
 
             mSites = Collections.unmodifiableList(sites);
+            mSourceKeys = Collections.unmodifiableMap(sourceKeys);
             notifyUpdated();
         }
     }

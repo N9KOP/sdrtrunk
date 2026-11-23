@@ -19,6 +19,7 @@
 
 package io.github.dsheirer.module.decode.nxdn;
 
+import io.github.dsheirer.module.decode.event.ActivitySummary;
 import io.github.dsheirer.channel.state.ChangeChannelTimeoutEvent;
 import io.github.dsheirer.channel.state.DecoderState;
 import io.github.dsheirer.channel.state.DecoderStateEvent;
@@ -75,6 +76,9 @@ import io.github.dsheirer.module.decode.nxdn.layer3.mobility.RegistrationCommand
 import io.github.dsheirer.module.decode.nxdn.layer3.mobility.RegistrationResponse;
 import io.github.dsheirer.module.decode.nxdn.layer3.mobility.RegistrationResponseTypeD;
 import io.github.dsheirer.module.decode.nxdn.layer3.proprietary.TalkerAliasComplete;
+import io.github.dsheirer.module.decode.nxdn.layer3.scch.Information1;
+import io.github.dsheirer.module.decode.nxdn.layer3.scch.InitializationVectorPart1;
+import io.github.dsheirer.module.decode.nxdn.layer3.type.CipherType;
 import io.github.dsheirer.protocol.Protocol;
 import java.util.Collections;
 import java.util.List;
@@ -165,16 +169,17 @@ public class NXDNDecoderState extends DecoderState
     @Override
     public String getActivitySummary()
     {
-        StringBuilder sb = new StringBuilder();
-        sb.append("NXDN Channel Activity Summary\n");
+        ActivitySummary summary = new ActivitySummary("NXDN");
 
         if(mChannel.getDecodeConfiguration() instanceof DecodeConfigNXDN configNXDN)
         {
-            sb.append("Transmission Mode: ").append(configNXDN.getTransmissionMode()).append("\n");
+            summary.section("Configuration");
+            summary.field("Transmission Mode", configNXDN.getTransmissionMode());
         }
-        sb.append(mNetworkConfigurationMonitor.getSummary()).append("\n");
-        sb.append(mTrafficChannelManager.getTalkerAliasManager().getAliasSummary()).append("\n");
-        return sb.toString();
+
+        mNetworkConfigurationMonitor.addActivitySummary(summary);
+        mTrafficChannelManager.getTalkerAliasManager().addAliasSummary(summary);
+        return summary.toString();
     }
 
     @Override
@@ -288,8 +293,9 @@ public class NXDNDecoderState extends DecoderState
                 {
                     //Controller responds to a voice call request with either a channel grant, or this message if
                     //it can't support the call or the called party is not available
+                    //Type-D call response doesn't carry a cause.
                     broadcastEvent(vcr.getIdentifiers(), vcr.getTimestamp(), DecodeEventType.RESPONSE,
-                            "VOICE CALL REQUEST - RESPONSE:" + vcr.getCause().toString());
+                            vcr.isTypeD() ? "CALL RESPONSE" : "VOICE CALL REQUEST - RESPONSE:" + vcr.getCause());
                 }
                 break;
             case TRAFFIC_OUT_01_CC_VOICE_CALL:
@@ -724,6 +730,24 @@ public class NXDNDecoderState extends DecoderState
 
             case UNKNOWN:
                 break;
+        }
+
+        //Messages that don't otherwise change the state (e.g. Type-D SCCH) but are carried in a frame that also carries
+        //voice are a continuation of the call.  Otherwise, the ACTIVE state toggles the channel out of CALL state on
+        //every voice frame, squelching the audio module which then discards the call audio.
+        if(state == State.ACTIVE && event == DecoderStateEvent.Event.DECODE && layer3.getLICH().hasAudio())
+        {
+            //Type-D only sends the VOICE CALL at the start of a call.  When we join late, or miss it, use the SCCH call
+            //info or initialization vector to determine the encryption state.
+            if(!mEncryptedCallStateDetermined && layer3 instanceof Information1 info1)
+            {
+                mEncryptedCallStateDetermined = true;
+                mEncryptedCall = info1 instanceof InitializationVectorPart1 ||
+                        info1.getCipherType() != CipherType.UNENCRYPTED;
+            }
+
+            state = (mEncryptedCallStateDetermined && mEncryptedCall) ? State.ENCRYPTED : State.CALL;
+            event = DecoderStateEvent.Event.CONTINUATION;
         }
 
         broadcast(new DecoderStateEvent(this, event, state));
